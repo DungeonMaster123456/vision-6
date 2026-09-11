@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Vision 6</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script>
+  // Backend hosted on Render — replace with YOUR actual Render URL after deploying
+  const BACKEND_URL = "https://vision6-backend.onrender.com";
+</script>
+<style>
+  :root{
+    --bg-0:#050914;
+    --bg-1:#0A1224;
+    --bg-2:#0F1B33;
+    --line:rgba(140,180,255,0.10);
+    --line-strong:rgba(140,180,255,0.22);
+    --blue-1:#2E7CF6;
+    --blue-2:#5FA8FF;
+    --blue-glow:#3D8BFF;
+    --text-1:#F3F6FC;
+    --text-2:#9FB0CC;
+    --text-3:#5E6E8C;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;}
+  body{
+    background:
+      radial-gradient(1100px 620px at 50% -8%, rgba(46,124,246,0.20), transparent 60%),
+      radial-gradient(800px 500px at 85% 15%, rgba(95,168,255,0.10), transparent 55%),
+      var(--bg-0);
+    color:var(--text-1);
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    min-height:100vh;
+    overflow-x:hidden;
+  }
+
+  /* subtle animated aurora film */
+  .aurora{
+    position:fixed; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(600px 340px at 20% 100%, rgba(46,124,246,0.10), transparent 60%),
+      radial-gradient(500px 340px at 80% 100%, rgba(95,168,255,0.08), transparent 60%);
+    animation: drift 22s ease-in-out infinite alternate;
+  }
+  @keyframes drift{
+    0%{ transform: translateY(0px) scale(1); }
+    100%{ transform: translateY(-18px) scale(1.03); }
+  }
+
+  nav{
+    position:relative; z-index:2;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:28px 48px;
+    max-width:1240px; margin:0 auto;
+  }
+  .brand{
+    font-size:19px; font-weight:600; letter-spacing:-0.01em;
+    display:flex; align-items:center; gap:10px;
+    color:var(--text-1);
+  }
+  .brand .mark{
+    width:26px; height:26px; border-radius:8px;
+    background:linear-gradient(135deg, var(--blue-2), var(--blue-1));
+    box-shadow:0 0 24px rgba(61,139,255,0.55);
+  }
+  .navlinks{ display:flex; gap:34px; font-size:14px; color:var(--text-2); }
+  .navlinks button{
+    background:none; border:none; font-family:inherit; font-size:14px; cursor:pointer;
+    color:var(--text-2); transition:color .25s ease; padding:0;
+  }
+  .navlinks button:hover, .navlinks button.active{ color:var(--text-1); }
+
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  main{
+    position:relative; z-index:2;
+    max-width:900px; margin:0 auto;
+    padding:64px 24px 140px;
+    text-align:center;
+  }
+
+  .eyebrow-free{
+    display:inline-flex; align-items:center; gap:8px;
+    font-size:13px; color:var(--text-2);
+    background:rgba(46,124,246,0.08);
+    border:1px solid var(--line-strong);
+    padding:7px 16px; border-radius:999px;
+    margin-bottom:34px;
+    opacity:0; animation: rise .8s ease forwards .05s;
+  }
+  .dot{ width:6px; height:6px; border-radius:50%; background:var(--blue-2); box-shadow:0 0 8px var(--blue-2); }
+
+  h1{
+    font-size:clamp(44px,7vw,76px);
+    font-weight:600;
+    letter-spacing:-0.035em;
+    line-height:1.02;
+    margin:0 0 20px;
+    background:linear-gradient(180deg, #FFFFFF 0%, #BFD6FF 100%);
+    -webkit-background-clip:text;
+    background-clip:text;
+    color:transparent;
+    opacity:0; animation: rise .9s ease forwards .15s;
+  }
+
+  .sub{
+    font-size:18px; color:var(--text-2);
+    max-width:560px; margin:0 auto 48px;
+    line-height:1.6; font-weight:400;
+    opacity:0; animation: rise .9s ease forwards .28s;
+  }
+
+  @keyframes rise{
+    from{ opacity:0; transform:translateY(14px); }
+    to{ opacity:1; transform:translateY(0); }
+  }
+
+  .composer{
+    position:relative;
+    background:linear-gradient(180deg, rgba(20,30,54,0.75), rgba(12,19,38,0.75));
+    border:1px solid var(--line-strong);
+    border-radius:22px;
+    padding:8px 8px 8px 26px;
+    display:flex; align-items:center; gap:12px;
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    box-shadow:0 20px 60px -20px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.04);
+    transition:border-color .3s ease, box-shadow .3s ease;
+    opacity:0; animation: rise .9s ease forwards .4s;
+  }
+  .composer:focus-within{
+    border-color:rgba(95,168,255,0.55);
+    box-shadow:0 20px 60px -20px rgba(0,0,0,0.6), 0 0 0 4px rgba(46,124,246,0.12), inset 0 1px 0 rgba(255,255,255,0.06);
+  }
+  .composer input{
+    flex:1; background:transparent; border:none; outline:none;
+    color:var(--text-1); font-size:16px; font-family:inherit;
+    padding:14px 0;
+  }
+  .composer input::placeholder{ color:var(--text-3); }
+
+  .gen-btn{
+    display:flex; align-items:center; justify-content:center;
+    width:46px; height:46px; border-radius:16px; border:none;
+    cursor:pointer; flex-shrink:0;
+    background:linear-gradient(135deg, var(--blue-2), var(--blue-1));
+    box-shadow:0 8px 24px -6px rgba(46,124,246,0.6);
+    transition:transform .22s cubic-bezier(.2,.8,.2,1), box-shadow .22s ease, opacity .22s ease;
+  }
+  .gen-btn:hover{ transform:translateY(-1px) scale(1.04); box-shadow:0 10px 28px -6px rgba(46,124,246,0.75); }
+  .gen-btn:active{ transform:scale(0.96); }
+  .gen-btn:disabled{ opacity:.5; cursor:default; transform:none; }
+  .gen-btn svg{ width:19px; height:19px; }
+
+  .controls-row{
+    display:flex; align-items:center; justify-content:center; gap:10px;
+    margin-top:18px; flex-wrap:wrap;
+    opacity:0; animation: rise .9s ease forwards .5s;
+  }
+  .chip{
+    font-size:13px; color:var(--text-2);
+    background:rgba(255,255,255,0.03);
+    border:1px solid var(--line);
+    padding:8px 15px; border-radius:999px;
+    cursor:pointer; transition:all .22s ease;
+    font-family:inherit;
+  }
+  .chip:hover{ border-color:var(--line-strong); color:var(--text-1); background:rgba(46,124,246,0.06); }
+  .chip.active{
+    color:#DCEBFF; border-color:rgba(95,168,255,0.5);
+    background:rgba(46,124,246,0.14);
+  }
+
+  .stage{
+    margin-top:56px;
+    min-height:0;
+  }
+
+  .placeholder-grid{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:14px;
+    margin-top:56px;
+    opacity:0; animation: rise 1s ease forwards .6s;
+  }
+  .ghost-card{
+    aspect-ratio:1/1; border-radius:18px;
+    border:1px solid var(--line);
+    background:linear-gradient(150deg, rgba(46,124,246,0.05), rgba(255,255,255,0.015));
+    display:flex; align-items:center; justify-content:center;
+    color:var(--text-3); font-size:13px;
+  }
+
+  .loading-wrap{
+    display:flex; flex-direction:column; align-items:center; gap:22px;
+    padding:20px 0;
+  }
+  .gen-canvas{
+    width:100%; max-width:640px; aspect-ratio:1/1;
+    border-radius:22px; overflow:hidden; position:relative;
+    border:1px solid var(--line-strong);
+    box-shadow:0 30px 80px -30px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.02);
+    background:var(--bg-2);
+  }
+  .gen-canvas .blob{
+    position:absolute; border-radius:50%;
+    filter:blur(40px);
+    opacity:0.75;
+    mix-blend-mode:screen;
+    animation: blobmove 7s ease-in-out infinite;
+  }
+  .gen-canvas .blob:nth-child(1){
+    width:65%; height:65%; left:-10%; top:-10%;
+    background:radial-gradient(circle, var(--blue-2), transparent 70%);
+    animation-duration:8s;
+  }
+  .gen-canvas .blob:nth-child(2){
+    width:55%; height:55%; right:-12%; top:10%;
+    background:radial-gradient(circle, #7C5CFF, transparent 70%);
+    animation-duration:9.5s; animation-delay:-2s;
+  }
+  .gen-canvas .blob:nth-child(3){
+    width:60%; height:60%; left:15%; bottom:-15%;
+    background:radial-gradient(circle, #FF6FB0, transparent 70%);
+    animation-duration:10.5s; animation-delay:-4s;
+  }
+  .gen-canvas .blob:nth-child(4){
+    width:45%; height:45%; right:5%; bottom:-8%;
+    background:radial-gradient(circle, var(--blue-1), transparent 70%);
+    animation-duration:7.5s; animation-delay:-1s;
+  }
+  @keyframes blobmove{
+    0%{ transform:translate(0,0) scale(1); }
+    25%{ transform:translate(8%,-6%) scale(1.12); }
+    50%{ transform:translate(-4%,7%) scale(0.92); }
+    75%{ transform:translate(-9%,-4%) scale(1.06); }
+    100%{ transform:translate(0,0) scale(1); }
+  }
+  .gen-canvas .sheen{
+    position:absolute; inset:0;
+    background:linear-gradient(115deg, transparent 30%, rgba(255,255,255,0.10) 45%, transparent 60%);
+    background-size:250% 250%;
+    animation: sheenmove 3.2s linear infinite;
+  }
+  @keyframes sheenmove{
+    0%{ background-position:120% 0%; }
+    100%{ background-position:-20% 0%; }
+  }
+  .gen-canvas .grain{
+    position:absolute; inset:0; opacity:0.05; pointer-events:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  .loading-text{ font-size:14px; color:var(--text-2); }
+
+  .result{
+    opacity:0; transform:scale(0.98);
+    animation: reveal .6s cubic-bezier(.2,.8,.2,1) forwards;
+  }
+  @keyframes reveal{
+    to{ opacity:1; transform:scale(1); }
+  }
+  .result img{
+    width:100%; max-width:640px; border-radius:22px;
+    border:1px solid var(--line-strong);
+    box-shadow:0 30px 80px -30px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.02);
+    display:block; margin:0 auto;
+  }
+  .result-actions{
+    display:flex; justify-content:center; gap:10px; margin-top:20px;
+  }
+  .action-btn{
+    font-size:13px; color:var(--text-2);
+    background:rgba(255,255,255,0.03);
+    border:1px solid var(--line);
+    padding:9px 18px; border-radius:12px;
+    cursor:pointer; font-family:inherit;
+    transition:all .22s ease;
+    display:flex; align-items:center; gap:7px;
+    text-decoration:none;
+  }
+  .action-btn:hover{ border-color:var(--line-strong); color:var(--text-1); }
+
+  .error-box{
+    color:#FFB4B0; font-size:14px;
+    background:rgba(255,80,80,0.06);
+    border:1px solid rgba(255,80,80,0.18);
+    padding:14px 20px; border-radius:14px;
+    max-width:480px; margin:40px auto 0;
+  }
+
+  footer{
+    position:relative; z-index:2;
+    text-align:center; padding:40px 24px 50px;
+    color:var(--text-3); font-size:13px;
+  }
+
+  /* reference image chip */
+  .ref-chip{
+    display:none;
+    align-items:center; gap:10px;
+    max-width:640px; margin:0 auto 18px;
+    background:rgba(46,124,246,0.08);
+    border:1px solid var(--line-strong);
+    border-radius:14px; padding:8px 14px;
+    font-size:13px; color:var(--text-2);
+  }
+  .ref-chip.show{ display:flex; }
+  .ref-chip img{ width:34px; height:34px; border-radius:8px; object-fit:cover; flex-shrink:0; }
+  .ref-chip span{ flex:1; text-align:left; }
+  .ref-chip button{
+    background:none; border:none; color:var(--text-3); cursor:pointer;
+    font-size:18px; line-height:1; padding:4px;
+  }
+  .ref-chip button:hover{ color:var(--text-1); }
+
+  /* wide pages: gallery / creations */
+  .page-wrap{ max-width:1180px; margin:0 auto; padding:56px 28px 120px; position:relative; z-index:2; }
+  .page-head{ text-align:center; margin-bottom:40px; }
+  .page-head h2{
+    font-size:clamp(30px,4vw,42px); font-weight:600; letter-spacing:-0.02em; margin:0 0 10px;
+    color:var(--text-1);
+  }
+  .page-head p{ color:var(--text-2); font-size:15px; margin:0; }
+
+  .grid100{
+    display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr));
+    gap:12px;
+  }
+  .tile{
+    position:relative; aspect-ratio:1/1; border-radius:14px; overflow:hidden;
+    cursor:pointer; border:1px solid var(--line);
+    background:var(--bg-2);
+  }
+  .tile img{
+    width:100%; height:100%; object-fit:cover; display:block;
+    transition:transform .35s cubic-bezier(.2,.8,.2,1), filter .35s ease;
+  }
+  .tile:hover img{ transform:scale(1.06); }
+  .tile-overlay{
+    position:absolute; inset:0;
+    background:linear-gradient(0deg, rgba(5,9,20,0.85) 0%, rgba(5,9,20,0) 45%);
+    opacity:0; transition:opacity .25s ease;
+    display:flex; align-items:flex-end; padding:10px;
+  }
+  .tile:hover .tile-overlay{ opacity:1; }
+  .tile-overlay span{ font-size:12px; color:var(--text-1); font-weight:500; }
+
+  .empty-state{
+    text-align:center; padding:80px 20px; color:var(--text-3);
+    border:1px dashed var(--line-strong); border-radius:18px;
+  }
+  .empty-state p{ margin:0 0 18px; font-size:15px; }
+  .empty-state button{
+    background:linear-gradient(135deg, var(--blue-2), var(--blue-1));
+    border:none; color:white; font-family:inherit; font-size:14px; font-weight:500;
+    padding:11px 22px; border-radius:12px; cursor:pointer;
+  }
+
+  .creation-card{ position:relative; }
+  .creation-remove{
+    position:absolute; top:8px; right:8px; z-index:2;
+    width:26px; height:26px; border-radius:8px; border:none;
+    background:rgba(5,9,20,0.7); color:var(--text-1); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    opacity:0; transition:opacity .2s ease;
+    font-size:15px;
+  }
+  .creation-card:hover .creation-remove{ opacity:1; }
+
+  /* about page */
+  .about-body{ max-width:640px; margin:0 auto; text-align:left; }
+  .about-body h3{ font-size:20px; font-weight:500; margin:32px 0 10px; color:var(--text-1); }
+  .about-body h3:first-child{ margin-top:0; }
+  .about-body p{ font-size:15px; line-height:1.75; color:var(--text-2); margin:0 0 4px; }
+
+  @media (max-width:640px){
+    nav{ padding:22px 20px; }
+    .navlinks{ display:none; }
+    .placeholder-grid{ grid-template-columns:repeat(3,1fr); gap:8px; }
+    main{ padding:44px 18px 100px; }
+    .composer{ padding:6px 6px 6px 18px; border-radius:18px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="aurora"></div>
+
+<nav>
+  <div class="brand"><span class="mark"></span>Vision 6</div>
+  <div class="navlinks">
+    <button data-view="create" class="active">Create</button>
+    <button data-view="gallery">Gallery</button>
+    <button data-view="styles">Styles</button>
+    <button data-view="creations">My creations</button>
+    <button data-view="about">About</button>
+  </div>
+</nav>
+
+<div id="view-create" class="view active">
+<main>
+  <div class="eyebrow-free"><span class="dot"></span>Free, high detail image generation</div>
+  <h1>Vision 6</h1>
+  <p class="sub">Describe anything. Vision 6 renders it in crisp, high detail imagery, in seconds.</p>
+
+  <div class="ref-chip" id="refChip">
+    <img id="refChipImg" src="" alt="" />
+    <span id="refChipLabel">Using reference image</span>
+    <button id="refChipClear" aria-label="Remove reference image">&times;</button>
+  </div>
+
+  <div class="composer">
+    <input id="prompt" type="text" placeholder="A lighthouse on a cliff at dusk, cinematic lighting..." autocomplete="off" />
+    <input type="file" id="fileInput" accept="image/*" style="display:none" />
+    <button class="gen-btn" id="uploadBtn" aria-label="Upload reference image" style="background:rgba(255,255,255,0.06); box-shadow:none;">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M12 5v14M5 12h14" stroke="#9FB0CC" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+    <button class="gen-btn" id="genBtn" aria-label="Generate image">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="controls-row" id="modeRow" style="margin-bottom:2px;">
+    <button class="chip active" data-mode="image">🖼️ Image</button>
+    <button class="chip" data-mode="video">🎬 Video (slow, ~5–10 min)</button>
+  </div>
+
+  <div class="controls-row" id="styleRow">
+    <button class="chip active" data-style="">No style</button>
+    <button class="chip" data-style="cinematic film still, dramatic lighting, 35mm">Cinematic</button>
+    <button class="chip" data-style="ultra detailed digital painting, concept art">Digital art</button>
+    <button class="chip" data-style="photorealistic, sharp focus, 8k detail">Photoreal</button>
+    <button class="chip" data-style="soft anime illustration style">Anime</button>
+    <button class="chip" data-style="minimalist flat vector illustration">Minimal</button>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="placeholder-grid">
+      <div class="ghost-card">Your image</div>
+      <div class="ghost-card">appears</div>
+      <div class="ghost-card">here</div>
+    </div>
+  </div>
+</main>
+</div>
+
+<div id="view-gallery" class="view">
+  <div class="page-wrap">
+    <div class="page-head">
+      <h2>Gallery</h2>
+      <p>Browse for inspiration. Click any image to use it as a reference.</p>
+    </div>
+    <div class="grid100" id="galleryGrid"></div>
+  </div>
+</div>
+
+<div id="view-styles" class="view">
+  <div class="page-wrap">
+    <div class="page-head">
+      <h2>Styles</h2>
+      <p>Pick a look, then jump straight into creating with it applied.</p>
+    </div>
+    <div class="grid100" id="stylesGrid" style="grid-template-columns:repeat(auto-fill, minmax(220px,1fr));"></div>
+  </div>
+</div>
+
+<div id="view-creations" class="view">
+  <div class="page-wrap">
+    <div class="page-head">
+      <h2>My creations</h2>
+      <p>Everything you've generated in this session.</p>
+    </div>
+    <div id="creationsContent"></div>
+  </div>
+</div>
+
+<div id="view-about" class="view">
+  <div class="page-wrap">
+    <div class="page-head">
+      <h2>About Vision 6</h2>
+    </div>
+    <div class="about-body">
+      <h3>What it is</h3>
+      <p>Vision 6 turns a written description into a detailed image. Type what you want to see, pick an optional style, and generate.</p>
+      <h3>Reference images</h3>
+      <p>Upload your own image, or click any image in the gallery, to use it as a visual reference. Vision 6 will use it alongside your prompt to guide the result.</p>
+      <h3>My creations</h3>
+      <p>Every image you generate is saved to My creations for this session, so you can revisit or download it later.</p>
+      <h3>Cost</h3>
+      <p>Vision 6 is free to use. Image generation runs on your own free account, so there's no cost to you beyond signing in once.</p>
+    </div>
+  </div>
+</div>
+
+<footer>Vision 6 &middot; image generation, made simple</footer>
+
+<script>
+  const promptInput = document.getElementById('prompt');
+  const genBtn = document.getElementById('genBtn');
+  const uploadBtn = document.getElementById('uploadBtn');
+  const fileInput = document.getElementById('fileInput');
+  const stage = document.getElementById('stage');
+  const styleRow = document.getElementById('styleRow');
+  const refChip = document.getElementById('refChip');
+  const refChipImg = document.getElementById('refChipImg');
+  const refChipLabel = document.getElementById('refChipLabel');
+  const refChipClear = document.getElementById('refChipClear');
+
+  let activeStyle = "";
+  let refImageDataUrl = null;
+  let creations = [];
+  let activeMode = "image"; // "image" | "video"
+
+  const modeRow = document.getElementById('modeRow');
+  modeRow.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if(!chip) return;
+    modeRow.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    activeMode = chip.dataset.mode;
+  });
+
+  /* ---------- view switching ---------- */
+  const navButtons = document.querySelectorAll('.navlinks button');
+  navButtons.forEach(btn => {
+    btn.addEventListener('click', () => switchView(btn.dataset.view));
+  });
+  function switchView(name){
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    document.getElementById('view-' + name).classList.add('active');
+    navButtons.forEach(b => b.classList.toggle('active', b.dataset.view === name));
+    if(name === 'gallery' && !galleryBuilt) buildGallery();
+    if(name === 'creations') renderCreations();
+  }
+
+  /* ---------- styles ---------- */
+  const styleDefs = [
+    { name:"No style", desc:"Your prompt, as written.", value:"" },
+    { name:"Cinematic", desc:"Dramatic film-still lighting.", value:"cinematic film still, dramatic lighting, 35mm" },
+    { name:"Digital art", desc:"Detailed concept-art painting.", value:"ultra detailed digital painting, concept art" },
+    { name:"Photoreal", desc:"Sharp, lifelike detail.", value:"photorealistic, sharp focus, 8k detail" },
+    { name:"Anime", desc:"Soft anime illustration.", value:"soft anime illustration style" },
+    { name:"Minimal", desc:"Flat, minimalist vector look.", value:"minimalist flat vector illustration" }
+  ];
+  styleRow.addEventListener('click', (e) => {
+    const chip = e.target.closest('.chip');
+    if(!chip) return;
+    styleRow.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+    chip.classList.add('active');
+    activeStyle = chip.dataset.style;
+  });
+
+  const stylesGrid = document.getElementById('stylesGrid');
+  stylesGrid.innerHTML = styleDefs.map((s, i) => `
+    <div class="tile creation-card" style="aspect-ratio:4/3; cursor:pointer;" data-style-index="${i}">
+      <img src="https://picsum.photos/seed/vision6style${i}/400/300" alt="${s.name}" />
+      <div class="tile-overlay" style="opacity:1; background:linear-gradient(0deg, rgba(5,9,20,0.92) 0%, rgba(5,9,20,0.15) 100%); flex-direction:column; align-items:flex-start; justify-content:flex-end; gap:2px;">
+        <span style="font-size:14px; font-weight:500;">${s.name}</span>
+        <span style="font-size:12px; color:var(--text-2); font-weight:400;">${s.desc}</span>
+      </div>
+    </div>
+  `).join('');
+  stylesGrid.addEventListener('click', (e) => {
+    const tile = e.target.closest('[data-style-index]');
+    if(!tile) return;
+    const s = styleDefs[Number(tile.dataset.styleIndex)];
+    activeStyle = s.value;
+    styleRow.querySelectorAll('.chip').forEach(c => {
+      c.classList.toggle('active', c.dataset.style === s.value);
+    });
+    switchView('create');
+    promptInput.focus();
+  });
+
+  /* ---------- gallery: 100 varied reference images ---------- */
+  let galleryBuilt = false;
+  const galleryGrid = document.getElementById('galleryGrid');
+  function buildGallery(){
+    let html = "";
+    for(let i = 1; i <= 100; i++){
+      const url = `https://picsum.photos/seed/vision6gal${i}/400/400`;
+      html += `
+        <div class="tile" data-img="${url}">
+          <img src="${url}" alt="Reference image ${i}" loading="lazy" />
+          <div class="tile-overlay"><span>Use as reference</span></div>
+        </div>
+      `;
+    }
+    galleryGrid.innerHTML = html;
+    galleryBuilt = true;
+  }
+  galleryGrid.addEventListener('click', async (e) => {
+    const tile = e.target.closest('.tile');
+    if(!tile) return;
+    const url = tile.dataset.img;
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      const dataUrl = await blobToDataUrl(blob);
+      setReferenceImage(dataUrl);
+      switchView('create');
+      promptInput.focus();
+    } catch(err){
+      console.error(err);
+      setReferenceImage(url);
+      switchView('create');
+    }
+  });
+
+  /* ---------- reference image handling ---------- */
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if(!file) return;
+    const dataUrl = await blobToDataUrl(file);
+    setReferenceImage(dataUrl);
+  });
+  refChipClear.addEventListener('click', () => setReferenceImage(null));
+
+  function setReferenceImage(dataUrl){
+    refImageDataUrl = dataUrl;
+    if(dataUrl){
+      refChipImg.src = dataUrl;
+      refChipLabel.textContent = "Using reference image";
+      refChip.classList.add('show');
+    } else {
+      refChip.classList.remove('show');
+    }
+  }
+  function blobToDataUrl(blob){
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  /* ---------- generation ---------- */
+  function setLoading(){
+    const label = activeMode === "video"
+      ? "Rendering your video... this can take 5–10 minutes on local hardware"
+      : "Rendering your image...";
+    stage.innerHTML = `
+      <div class="loading-wrap">
+        <div class="gen-canvas">
+          <div class="blob"></div>
+          <div class="blob"></div>
+          <div class="blob"></div>
+          <div class="blob"></div>
+          <div class="grain"></div>
+          <div class="sheen"></div>
+        </div>
+        <div class="loading-text">${label}</div>
+      </div>
+    `;
+  }
+  function setError(msg){
+    stage.innerHTML = `<div class="error-box">${msg}</div>`;
+  }
+  function setResult(url, promptText, kind){
+    const isVideo = kind === "video";
+    const mediaTag = isVideo
+      ? `<video src="${url}" controls autoplay loop muted style="width:100%; border-radius:18px; display:block;"></video>`
+      : `<img src="${url}" alt="${promptText.replace(/"/g,'&quot;')}" />`;
+    const filename = isVideo ? "vision6.mp4" : "vision6.png";
+    stage.innerHTML = `
+      <div class="result">
+        ${mediaTag}
+        <div class="result-actions">
+          <a class="action-btn" href="${url}" download="${filename}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+            Download
+          </a>
+          <button class="action-btn" id="regenBtn">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M4 10a8 8 0 0114-5M20 14a8 8 0 01-14 5"/></svg>
+            Regenerate
+          </button>
+        </div>
+      </div>
+    `;
+    document.getElementById('regenBtn').addEventListener('click', () => generate());
+  }
+
+  function addToCreations(url, promptText, kind){
+    creations.unshift({ url, prompt: promptText, kind: kind || "image", time: Date.now() });
+  }
+
+  function renderCreations(){
+    const el = document.getElementById('creationsContent');
+    if(creations.length === 0){
+      el.innerHTML = `
+        <div class="empty-state">
+          <p>Nothing here yet. Generate an image and it will show up in this list.</p>
+          <button id="emptyCreateBtn">Start creating</button>
+        </div>
+      `;
+      document.getElementById('emptyCreateBtn').addEventListener('click', () => switchView('create'));
+      return;
+    }
+    el.innerHTML = `<div class="grid100">` + creations.map((c, i) => `
+      <div class="tile creation-card" data-creation-index="${i}">
+        ${c.kind === "video"
+          ? `<video src="${c.url}" muted loop style="width:100%; height:100%; object-fit:cover;"></video>`
+          : `<img src="${c.url}" alt="${c.prompt.replace(/"/g,'&quot;')}" />`}
+        <button class="creation-remove" data-remove-index="${i}" aria-label="Remove">&times;</button>
+        <div class="tile-overlay"><span>${c.kind === "video" ? "🎬 " : ""}${c.prompt.length > 40 ? c.prompt.slice(0,40) + '…' : c.prompt}</span></div>
+      </div>
+    `).join('') + `</div>`;
+  }
+  document.getElementById('creationsContent').addEventListener('click', (e) => {
+    const removeBtn = e.target.closest('[data-remove-index]');
+    if(removeBtn){
+      creations.splice(Number(removeBtn.dataset.removeIndex), 1);
+      renderCreations();
+      return;
+    }
+    const tile = e.target.closest('[data-creation-index]');
+    if(tile){
+      const c = creations[Number(tile.dataset.creationIndex)];
+      switchView('create');
+      setResult(c.url, c.prompt, c.kind);
+    }
+  });
+
+  async function generate(){
+    const raw = promptInput.value.trim();
+    if(!raw){
+      promptInput.focus();
+      return;
+    }
+    const fullPrompt = activeStyle ? `${raw}, ${activeStyle}` : raw;
+
+    genBtn.disabled = true;
+    setLoading();
+
+    try {
+      const endpoint = activeMode === "video" ? "/generate-video" : "/generate-image";
+      const resp = await fetch(BACKEND_URL + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: fullPrompt })
+      });
+
+      if(!resp.ok){
+        const errBody = await resp.json().catch(() => ({}));
+        throw new Error(errBody.detail || `Server error (${resp.status})`);
+      }
+
+      const data = await resp.json();
+      const url = BACKEND_URL + data.url; // e.g. http://localhost:8000/files/xyz.png
+
+      setResult(url, raw, activeMode);
+      addToCreations(url, raw, activeMode);
+    } catch (err) {
+      console.error(err);
+      setError(
+        "Couldn't reach the local backend. Make sure it's running: " +
+        "<code>uvicorn main:app --port 8000</code> in your backend folder. " +
+        "(" + (err.message || "") + ")"
+      );
+    } finally {
+      genBtn.disabled = false;
+    }
+  }
+
+  genBtn.addEventListener('click', generate);
+  promptInput.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') generate();
+  });
+</script>
+
+</body>
+</html>
