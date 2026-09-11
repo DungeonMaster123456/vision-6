@@ -389,6 +389,14 @@
 
 <div class="aurora"></div>
 
+<div id="upsamplerOverlay" style="display:none; position:fixed; inset:0; z-index:9999; background:#050914;">
+  <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; background:var(--bg-1,#0A1224); border-bottom:1px solid rgba(140,180,255,0.15);">
+    <span style="color:#fff; font-weight:600; font-size:15px;" id="upsamplerTitle">Upsampler</span>
+    <button id="upsamplerExitBtn" style="background:rgba(255,255,255,0.08); border:none; color:#fff; width:34px; height:34px; border-radius:10px; font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+  </div>
+  <iframe id="upsamplerFrame" src="" style="width:100%; height:calc(100% - 62px); border:none;" allow="clipboard-write"></iframe>
+</div>
+
 <nav>
   <div class="brand"><span class="mark"></span>Vision 6</div>
   <div class="navlinks">
@@ -426,8 +434,12 @@
   </div>
 
   <div class="controls-row" id="modeRow" style="margin-bottom:2px;">
-    <button class="chip active" data-mode="image">🖼️ Image</button>
-    <button class="chip" data-mode="video">🎬 Video (slow, ~5–10 min)</button>
+    <button class="chip active" data-mode="image">🖼️ Image (instant, free)</button>
+    <button class="chip" data-mode="video">🎬 Video (opens Upsampler)</button>
+  </div>
+
+  <div class="controls-row" id="imgToolsRow" style="margin-bottom:2px;">
+    <button class="chip" id="editImageBtn">✏️ Edit image with AI (Upsampler)</button>
   </div>
 
   <div class="controls-row" id="styleRow">
@@ -523,6 +535,56 @@
     modeRow.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
     chip.classList.add('active');
     activeMode = chip.dataset.mode;
+
+    if(activeMode === "video"){
+      openUpsampler("video", promptInput.value.trim());
+      // snap back to image mode in the UI since video isn't a backend mode anymore
+      modeRow.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+      modeRow.querySelector('[data-mode="image"]').classList.add('active');
+      activeMode = "image";
+    }
+  });
+
+  /* ---------- Upsampler overlay (video + image editing) ---------- */
+  const upsamplerOverlay = document.getElementById('upsamplerOverlay');
+  const upsamplerFrame = document.getElementById('upsamplerFrame');
+  const upsamplerTitle = document.getElementById('upsamplerTitle');
+  const upsamplerExitBtn = document.getElementById('upsamplerExitBtn');
+
+  function openUpsampler(kind, promptText){
+    let url;
+    if(kind === "video"){
+      url = "https://upsampler.com/free-video-generator-no-signup";
+      upsamplerTitle.textContent = "Upsampler — Video Generator";
+    } else {
+      url = "https://upsampler.com/free-image-editing-model-no-signup";
+      upsamplerTitle.textContent = "Upsampler — Edit Image";
+    }
+    upsamplerFrame.src = url;
+    upsamplerOverlay.style.display = "block";
+    // Upsampler doesn't support prompt pre-fill via URL params, so we copy
+    // the prompt to clipboard as a convenience if one exists.
+    if(promptText){
+      navigator.clipboard?.writeText(promptText).catch(() => {});
+    }
+  }
+
+  function closeUpsampler(){
+    upsamplerOverlay.style.display = "none";
+    upsamplerFrame.src = ""; // stop playback/loading when closed
+  }
+
+  upsamplerExitBtn.addEventListener('click', closeUpsampler);
+  upsamplerOverlay.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape') closeUpsampler();
+  });
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape' && upsamplerOverlay.style.display === 'block') closeUpsampler();
+  });
+
+  const editImageBtn = document.getElementById('editImageBtn');
+  editImageBtn.addEventListener('click', () => {
+    openUpsampler("image-edit", promptInput.value.trim());
   });
 
   /* ---------- view switching ---------- */
@@ -643,9 +705,6 @@
 
   /* ---------- generation ---------- */
   function setLoading(){
-    const label = activeMode === "video"
-      ? "Rendering your video... this can take 5–10 minutes on local hardware"
-      : "Rendering your image...";
     stage.innerHTML = `
       <div class="loading-wrap">
         <div class="gen-canvas">
@@ -656,7 +715,7 @@
           <div class="grain"></div>
           <div class="sheen"></div>
         </div>
-        <div class="loading-text">${label}</div>
+        <div class="loading-text">Rendering your image...</div>
       </div>
     `;
   }
@@ -681,10 +740,18 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M4 10a8 8 0 0114-5M20 14a8 8 0 01-14 5"/></svg>
             Regenerate
           </button>
+          ${!isVideo ? `
+          <button class="action-btn" id="editResultBtn">
+            ✏️ Edit with AI
+          </button>` : ''}
         </div>
       </div>
     `;
     document.getElementById('regenBtn').addEventListener('click', () => generate());
+    const editBtn = document.getElementById('editResultBtn');
+    if(editBtn){
+      editBtn.addEventListener('click', () => openUpsampler("image-edit", promptText));
+    }
   }
 
   function addToCreations(url, promptText, kind){
@@ -740,8 +807,7 @@
     setLoading();
 
     try {
-      const endpoint = activeMode === "video" ? "/generate-video" : "/generate-image";
-      const resp = await fetch(BACKEND_URL + endpoint, {
+      const resp = await fetch(BACKEND_URL + "/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: fullPrompt })
@@ -753,14 +819,14 @@
       }
 
       const data = await resp.json();
-      const url = BACKEND_URL + data.url; // e.g. http://localhost:8000/files/xyz.png
+      const url = BACKEND_URL + data.url;
 
-      setResult(url, raw, activeMode);
-      addToCreations(url, raw, activeMode);
+      setResult(url, raw, "image");
+      addToCreations(url, raw, "image");
     } catch (err) {
       console.error(err);
       setError(
-        "Couldn't reach the local backend. Make sure it's running: " +
+        "Couldn't reach the backend. It may be waking up (Render free tier) — try again in 30 seconds. " +
         "<code>uvicorn main:app --port 8000</code> in your backend folder. " +
         "(" + (err.message || "") + ")"
       );
