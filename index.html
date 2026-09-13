@@ -8,8 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script>
-  // Backend hosted on Render
-  const BACKEND_URL = "https://vision-6-nvyo.onrender.com";
+  // Backend runs locally on your Mac (FastAPI, lightweight — no AI models loaded locally,
+  // just proxies to Pollinations for images). Start it before using this page.
+  const BACKEND_URL = "http://localhost:8000";
 </script>
 <style>
   :root{
@@ -435,7 +436,7 @@
 
   <div class="controls-row" id="modeRow" style="margin-bottom:2px;">
     <button class="chip active" data-mode="image">🖼️ Image (instant, free)</button>
-    <button class="chip" data-mode="video">🎬 Video (opens Upsampler)</button>
+    <button class="chip" data-mode="video">🎬 Video (slow, ~3-5 min)</button>
   </div>
 
   <div class="controls-row" id="imgToolsRow" style="margin-bottom:2px;">
@@ -535,14 +536,6 @@
     modeRow.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
     chip.classList.add('active');
     activeMode = chip.dataset.mode;
-
-    if(activeMode === "video"){
-      openUpsampler("video", promptInput.value.trim());
-      // snap back to image mode in the UI since video isn't a backend mode anymore
-      modeRow.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-      modeRow.querySelector('[data-mode="image"]').classList.add('active');
-      activeMode = "image";
-    }
   });
 
   /* ---------- Upsampler overlay (video + image editing) ---------- */
@@ -807,31 +800,94 @@
     setLoading();
 
     try {
-      const resp = await fetch(BACKEND_URL + "/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: fullPrompt })
-      });
-
-      if(!resp.ok){
-        const errBody = await resp.json().catch(() => ({}));
-        throw new Error(errBody.detail || `Server error (${resp.status})`);
+      if(activeMode === "video"){
+        await generateVideo(fullPrompt, raw);
+      } else {
+        await generateImage(fullPrompt, raw);
       }
-
-      const data = await resp.json();
-      const url = BACKEND_URL + data.url;
-
-      setResult(url, raw, "image");
-      addToCreations(url, raw, "image");
     } catch (err) {
       console.error(err);
       setError(
-        "Couldn't reach the backend. It may be waking up (Render free tier) — try again in 30 seconds. " +
+        "Couldn't reach the backend. Make sure it's running on your Mac: " +
         "<code>uvicorn main:app --port 8000</code> in your backend folder. " +
         "(" + (err.message || "") + ")"
       );
     } finally {
       genBtn.disabled = false;
+    }
+  }
+
+  async function generateImage(fullPrompt, raw){
+    const resp = await fetch(BACKEND_URL + "/generate-image", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: fullPrompt })
+    });
+
+    if(!resp.ok){
+      const errBody = await resp.json().catch(() => ({}));
+      throw new Error(errBody.detail || `Server error (${resp.status})`);
+    }
+
+    const data = await resp.json();
+    const url = BACKEND_URL + data.url;
+
+    setResult(url, raw, "image");
+    addToCreations(url, raw, "image");
+  }
+
+  async function generateVideo(fullPrompt, raw){
+    const startResp = await fetch(BACKEND_URL + "/generate-video", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: fullPrompt })
+    });
+
+    if(!startResp.ok){
+      const errBody = await startResp.json().catch(() => ({}));
+      throw new Error(errBody.detail || `Server error (${startResp.status})`);
+    }
+
+    const { call_id } = await startResp.json();
+    if(!call_id) throw new Error("No call_id returned from backend");
+
+    // Poll every 8 seconds. Video generation genuinely takes a few minutes —
+    // this loop just waits patiently without holding one long connection open.
+    const maxAttempts = 60; // ~8 minutes ceiling
+    for(let attempt = 0; attempt < maxAttempts; attempt++){
+      await new Promise(r => setTimeout(r, 8000));
+
+      const statusResp = await fetch(
+        BACKEND_URL + "/video-status?call_id=" + encodeURIComponent(call_id)
+      );
+      if(!statusResp.ok){
+        throw new Error(`Status check failed (${statusResp.status})`);
+      }
+      const statusData = await statusResp.json();
+
+      if(statusData.status === "done"){
+        const url = BACKEND_URL + statusData.url;
+        setResult(url, raw, "video");
+        addToCreations(url, raw, "video");
+        return;
+      }
+      if(statusData.status === "error"){
+        throw new Error(statusData.error || "Video generation failed");
+      }
+      if(statusData.status === "expired"){
+        throw new Error("Video result expired before it could be retrieved");
+      }
+      // status === "pending" — keep waiting, update loading text with progress
+      updateVideoProgress(attempt, maxAttempts);
+    }
+    throw new Error("Video generation timed out after several minutes");
+  }
+
+  function updateVideoProgress(attempt, maxAttempts){
+    const el = document.querySelector('.loading-text');
+    if(el){
+      const seconds = attempt * 8;
+      el.textContent = `Generating your video... (${seconds}s elapsed, this can take a few minutes)`;
     }
   }
 
