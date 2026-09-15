@@ -176,6 +176,14 @@
     color:#DCEBFF; border-color:rgba(95,168,255,0.5);
     background:rgba(46,124,246,0.14);
   }
+  .mode-num{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:18px; height:18px; margin-right:6px;
+    border-radius:50%;
+    border:1px solid currentColor;
+    font-size:11px; font-weight:600;
+    vertical-align:-1px;
+  }
 
   .stage{
     margin-top:56px;
@@ -435,12 +443,8 @@
   </div>
 
   <div class="controls-row" id="modeRow" style="margin-bottom:2px;">
-    <button class="chip active" data-mode="image">🖼️ Image (instant, free)</button>
-    <button class="chip" data-mode="video">🎬 Video (slow, ~3-5 min)</button>
-  </div>
-
-  <div class="controls-row" id="imgToolsRow" style="margin-bottom:2px;">
-    <button class="chip" id="editImageBtn">✏️ Edit image with AI (Upsampler)</button>
+    <button class="chip active" data-mode="image"><span class="mode-num">1</span> Image</button>
+    <button class="chip" data-mode="video"><span class="mode-num">2</span> Video</button>
   </div>
 
   <div class="controls-row" id="styleRow">
@@ -573,11 +577,6 @@
   });
   document.addEventListener('keydown', (e) => {
     if(e.key === 'Escape' && upsamplerOverlay.style.display === 'block') closeUpsampler();
-  });
-
-  const editImageBtn = document.getElementById('editImageBtn');
-  editImageBtn.addEventListener('click', () => {
-    openUpsampler("image-edit", promptInput.value.trim());
   });
 
   /* ---------- view switching ---------- */
@@ -733,18 +732,10 @@
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4v6h6M20 20v-6h-6M4 10a8 8 0 0114-5M20 14a8 8 0 01-14 5"/></svg>
             Regenerate
           </button>
-          ${!isVideo ? `
-          <button class="action-btn" id="editResultBtn">
-            ✏️ Edit with AI
-          </button>` : ''}
         </div>
       </div>
     `;
     document.getElementById('regenBtn').addEventListener('click', () => generate());
-    const editBtn = document.getElementById('editResultBtn');
-    if(editBtn){
-      editBtn.addEventListener('click', () => openUpsampler("image-edit", promptText));
-    }
   }
 
   function addToCreations(url, promptText, kind){
@@ -769,7 +760,7 @@
           ? `<video src="${c.url}" muted loop style="width:100%; height:100%; object-fit:cover;"></video>`
           : `<img src="${c.url}" alt="${c.prompt.replace(/"/g,'&quot;')}" />`}
         <button class="creation-remove" data-remove-index="${i}" aria-label="Remove">&times;</button>
-        <div class="tile-overlay"><span>${c.kind === "video" ? "🎬 " : ""}${c.prompt.length > 40 ? c.prompt.slice(0,40) + '…' : c.prompt}</span></div>
+        <div class="tile-overlay"><span>${c.kind === "video" ? "▶ " : ""}${c.prompt.length > 40 ? c.prompt.slice(0,40) + '…' : c.prompt}</span></div>
       </div>
     `).join('') + `</div>`;
   }
