@@ -1,170 +1,145 @@
 """
-Vision 6 backend.
-Images: Cloudflare Workers AI (free tier — 10,000 neurons/day, FLUX.1-schnell).
-Video: your own Modal GPU deployment (LTX-Video).
+Vision 6 — "Deep" mode: HunyuanVideo 1.5 generation on Modal H100.
+Premium, quota-limited (see backend/main.py for the daily quota logic).
 
-Splitting image load onto Cloudflare frees up Modal's $30/month budget
-entirely for higher-quality/longer video generations.
-
-Run locally with:  uvicorn main:app --host 0.0.0.0 --port 8000
+Deploy with:  modal deploy modal_app.py
 """
 
+import modal
+import io
 import os
-import uuid
-import base64
-import httpx
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
-# ---------- setup ----------
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
 
-OUTPUT_DIR = os.path.join(os.path.dirname(__file__), "outputs")
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+app = modal.App("vision6-deep")
 
-# Get these from https://dash.cloudflare.com (Account ID on the overview page,
-# API token from My Profile -> API Tokens -> Create Token -> "Workers AI" template)
-CLOUDFLARE_ACCOUNT_ID = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
-CLOUDFLARE_API_TOKEN = os.environ.get("CLOUDFLARE_API_TOKEN", "")
-CLOUDFLARE_IMAGE_MODEL = "@cf/black-forest-labs/flux-1-schnell"
-CLOUDFLARE_URL = f"https://api.cloudflare.com/client/v4/accounts/{{account_id}}/ai/run/{CLOUDFLARE_IMAGE_MODEL}"
-
-MODAL_VIDEO_GENERATE_URL = os.environ.get("MODAL_VIDEO_GENERATE_URL", "https://monikasic6--vision6-video-generate-video.modal.run")
-MODAL_VIDEO_STATUS_URL = os.environ.get("MODAL_VIDEO_STATUS_URL", "https://monikasic6--vision6-video-video-status.modal.run")
-
-app = FastAPI(title="Vision 6 Backend")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "torch",
+        "diffusers",
+        "transformers",
+        "accelerate",
+        "sentencepiece",
+        "protobuf",
+        "fastapi[standard]",
+        "imageio",
+        "imageio-ffmpeg",
+        "hf_transfer",
+    )
 )
 
-app.mount("/files", StaticFiles(directory=OUTPUT_DIR), name="files")
+with image.imports():
+    import torch
+    from diffusers import HunyuanVideoPipeline
+    from diffusers.utils import export_to_video
+
+# Kept intentionally modest — H100 is expensive, and this mode is quota-limited
+# server-side anyway. Short clips, reasonable resolution.
+MAX_FRAMES = 49         # ~2s at 24fps
+MAX_STEPS = 30
+WIDTH = 768
+HEIGHT = 512
 
 
-# ---------- request schemas ----------
+@app.cls(
+    gpu="H100",
+    image=image,
+    scaledown_window=120,
+    timeout=900,
+)
+class DeepVideoModel:
+    def __init__(self):
+        self.pipe = None
 
-class ImageRequest(BaseModel):
-    prompt: str
-    width: int = 1024
-    height: int = 1024
-
-
-class VideoRequest(BaseModel):
-    prompt: str
-    duration: int = 5
-
-
-# ---------- endpoints ----------
-
-@app.get("/health")
-def health():
-    return {
-        "status": "ok",
-        "cloudflare_configured": bool(CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN),
-        "video_configured": bool(MODAL_VIDEO_GENERATE_URL),
-    }
-
-
-@app.post("/generate-image")
-def generate_image(req: ImageRequest):
-    if not req.prompt.strip():
-        raise HTTPException(400, "Prompt is empty")
-    if not CLOUDFLARE_ACCOUNT_ID or not CLOUDFLARE_API_TOKEN:
-        raise HTTPException(400, "CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN not set.")
-
-    print(f"[vision6] Generating image via Cloudflare Workers AI: {req.prompt!r}")
-
-    url = CLOUDFLARE_URL.format(account_id=CLOUDFLARE_ACCOUNT_ID)
-
-    try:
-        with httpx.Client(timeout=60.0) as client:
-            resp = client.post(
-                url,
-                headers={"Authorization": f"Bearer {CLOUDFLARE_API_TOKEN}"},
-                json={"prompt": req.prompt},
+    def _load(self):
+        if self.pipe is None:
+            self.pipe = HunyuanVideoPipeline.from_pretrained(
+                "hunyuanvideo-community/HunyuanVideo",
+                dtype=torch.bfloat16,
+                device_map="balanced",
             )
-            resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        raise HTTPException(502, f"Cloudflare image request failed ({e.response.status_code}): {e.response.text[:300]}")
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"Cloudflare image request failed: {e}")
 
-    data = resp.json()
-    if not data.get("success"):
-        raise HTTPException(502, f"Cloudflare returned an error: {data.get('errors')}")
+    @modal.method()
+    def generate(self, prompt: str, num_frames: int, steps: int) -> bytes:
+        num_frames = min(num_frames, MAX_FRAMES)
+        steps = min(steps, MAX_STEPS)
 
-    # Cloudflare's flux-schnell returns base64-encoded PNG data in result.image
-    image_b64 = data["result"]["image"]
-    image_bytes = base64.b64decode(image_b64)
+        self._load()
+        result = self.pipe(
+            prompt=prompt,
+            width=WIDTH,
+            height=HEIGHT,
+            num_frames=num_frames,
+            num_inference_steps=steps,
+        )
+        frames = result.frames[0]
 
-    filename = f"{uuid.uuid4().hex}.png"
-    path = os.path.join(OUTPUT_DIR, filename)
-    with open(path, "wb") as f:
-        f.write(image_bytes)
+        import tempfile
+        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as tmp:
+            tmp_path = tmp.name
+        export_to_video(frames, tmp_path, fps=24)
+        with open(tmp_path, "rb") as f:
+            data = f.read()
+        os.unlink(tmp_path)
+        return data
 
-    return {"url": f"/files/{filename}"}
 
-
-@app.post("/generate-video")
-def generate_video(req: VideoRequest):
+@app.function(image=image, timeout=900)
+@modal.fastapi_endpoint(method="POST")
+def generate_deep_video(item: dict):
     """
-    Starts a video generation job on Modal and returns a call_id immediately.
-    The frontend should poll /video-status?call_id=... until status is "done".
+    Starts generation asynchronously and returns a call_id immediately.
+    Poll /deep-video-status?call_id=... to check progress and get the result.
+    NOTE: quota enforcement happens in the main backend (main.py), not here —
+    this endpoint trusts that the caller already checked the daily limit.
     """
-    if not req.prompt.strip():
-        raise HTTPException(400, "Prompt is empty")
-    if not MODAL_VIDEO_GENERATE_URL:
-        raise HTTPException(400, "MODAL_VIDEO_GENERATE_URL is not set. Deploy the video Modal app first.")
+    from fastapi import Response
+    import json
 
-    print(f"[vision6] Starting video generation via Modal: {req.prompt!r}")
+    prompt = item.get("prompt", "").strip()
+    if not prompt:
+        return Response(content='{"error":"Prompt is empty"}', status_code=400, media_type="application/json")
+
+    duration_seconds = item.get("duration", 2)
+    num_frames = max(9, min(int(duration_seconds * 24), MAX_FRAMES))
+
+    model = DeepVideoModel()
+    call = model.generate.spawn(
+        prompt=prompt,
+        num_frames=num_frames,
+        steps=MAX_STEPS,
+    )
+    return Response(
+        content=json.dumps({"call_id": call.object_id}),
+        media_type="application/json",
+    )
+
+
+@app.function(image=image)
+@modal.fastapi_endpoint(method="GET")
+def deep_video_status(call_id: str):
+    from fastapi import Response
+    import json
+    import base64
 
     try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.post(MODAL_VIDEO_GENERATE_URL, json={
-                "prompt": req.prompt, "duration": req.duration
-            })
-            resp.raise_for_status()
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"Modal video request failed: {e}")
+        function_call = modal.FunctionCall.from_id(call_id)
+        result = function_call.get(timeout=0)
+    except modal.exception.OutputExpiredError:
+        return Response(content='{"status":"expired"}', status_code=410, media_type="application/json")
+    except TimeoutError:
+        return Response(content='{"status":"pending"}', media_type="application/json")
+    except Exception as e:
+        return Response(
+            content=json.dumps({"status": "error", "error": str(e)[:300]}),
+            status_code=500,
+            media_type="application/json",
+        )
 
-    return resp.json()  # {"call_id": "fc-..."}
-
-
-@app.get("/video-status")
-def video_status(call_id: str):
-    """
-    Poll this with the call_id returned from /generate-video.
-    Returns {"status": "pending"} while running, or {"status": "done", "url": "..."}
-    once the video is ready and saved locally.
-    """
-    if not MODAL_VIDEO_STATUS_URL:
-        raise HTTPException(400, "MODAL_VIDEO_STATUS_URL is not set.")
-
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.get(MODAL_VIDEO_STATUS_URL, params={"call_id": call_id})
-    except httpx.HTTPError as e:
-        raise HTTPException(502, f"Modal status request failed: {e}")
-
-    try:
-        data = resp.json()
-    except ValueError:
-        # Transient empty/invalid response from Modal — treat as still pending
-        # rather than crashing, so the frontend's polling loop just tries again.
-        return {"status": "pending"}
-
-    if data.get("status") != "done":
-        return data  # pending / error / expired — pass through as-is
-
-    # Decode the base64 video and save it locally, same as other outputs
-    video_bytes = base64.b64decode(data["video_base64"])
-    filename = f"{uuid.uuid4().hex}.mp4"
-    path = os.path.join(OUTPUT_DIR, filename)
-    with open(path, "wb") as f:
-        f.write(video_bytes)
-
-    return {"status": "done", "url": f"/files/{filename}"}
+    b64_video = base64.b64encode(result).decode("utf-8")
+    return Response(
+        content=json.dumps({"status": "done", "video_base64": b64_video}),
+        media_type="application/json",
+    )
