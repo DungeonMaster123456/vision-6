@@ -405,6 +405,35 @@
   <iframe id="upsamplerFrame" src="" style="width:100%; height:calc(100% - 62px); border:none;" allow="clipboard-write"></iframe>
 </div>
 
+<div id="deepOverlay" style="display:none; position:fixed; inset:0; z-index:9998; background:#050914; overflow:hidden;">
+  <div id="deepZoomLayer" style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; transform:scale(1); transition:transform 0.6s cubic-bezier(.4,0,.2,1), opacity 0.6s ease;">
+    <div style="text-align:center;">
+      <div style="font-size:13px; letter-spacing:0.12em; text-transform:uppercase; color:#5FA8FF; margin-bottom:10px;">Deep</div>
+      <div style="font-size:22px; color:#fff; font-weight:600;">Entering Deep mode…</div>
+    </div>
+  </div>
+  <div id="deepContent" style="position:absolute; inset:0; opacity:0; pointer-events:none; transition:opacity 0.4s ease;">
+    <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid rgba(140,180,255,0.15);">
+      <div>
+        <span style="color:#fff; font-weight:600; font-size:15px;">Deep</span>
+        <span style="color:var(--text-3); font-size:12px; margin-left:10px;" id="deepQuotaLabel">-- left today</span>
+      </div>
+      <button id="deepExitBtn" style="background:rgba(255,255,255,0.08); border:none; color:#fff; width:34px; height:34px; border-radius:10px; font-size:18px; cursor:pointer; display:flex; align-items:center; justify-content:center;">✕</button>
+    </div>
+    <div style="max-width:720px; margin:60px auto 0; padding:0 20px;">
+      <div class="composer">
+        <input id="deepPrompt" type="text" placeholder="Describe the video you want, in real detail..." autocomplete="off" />
+        <button class="gen-btn" id="deepGenBtn" aria-label="Generate deep video">
+          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <div id="deepStage" style="margin-top:32px;"></div>
+    </div>
+  </div>
+</div>
+
 <nav>
   <div class="brand"><span class="mark"></span>Vision 6</div>
   <div class="navlinks">
@@ -808,11 +837,25 @@
   }
 
   async function generateImage(fullPrompt, raw){
-    const resp = await fetch(BACKEND_URL + "/generate-image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt: fullPrompt })
-    });
+    let resp;
+
+    if(refImageDataUrl){
+      // i2i: reference image is present, extract raw base64 (strip the
+      // "data:image/...;base64," prefix) and call the edit endpoint
+      const base64 = refImageDataUrl.split(',')[1];
+      resp = await fetch(BACKEND_URL + "/edit-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: fullPrompt, image_base64: base64, strength: 0.75 })
+      });
+    } else {
+      // t2i: plain text-to-image
+      resp = await fetch(BACKEND_URL + "/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: fullPrompt })
+      });
+    }
 
     if(!resp.ok){
       const errBody = await resp.json().catch(() => ({}));
@@ -827,63 +870,196 @@
   }
 
   async function generateVideo(fullPrompt, raw){
-    const startResp = await fetch(BACKEND_URL + "/generate-video", {
+    const resp = await fetch(BACKEND_URL + "/search-video", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt: fullPrompt })
     });
 
-    if(!startResp.ok){
-      const errBody = await startResp.json().catch(() => ({}));
-      throw new Error(errBody.detail || `Server error (${startResp.status})`);
+    if(!resp.ok){
+      const errBody = await resp.json().catch(() => ({}));
+      throw new Error(errBody.detail || `Server error (${resp.status})`);
     }
 
-    const { call_id } = await startResp.json();
-    if(!call_id) throw new Error("No call_id returned from backend");
-
-    // Poll every 8 seconds. Video generation genuinely takes a few minutes —
-    // this loop just waits patiently without holding one long connection open.
-    const maxAttempts = 90; // ~12 minutes ceiling, matches higher-quality video settings
-    for(let attempt = 0; attempt < maxAttempts; attempt++){
-      await new Promise(r => setTimeout(r, 8000));
-
-      const statusResp = await fetch(
-        BACKEND_URL + "/video-status?call_id=" + encodeURIComponent(call_id)
-      );
-      if(!statusResp.ok){
-        throw new Error(`Status check failed (${statusResp.status})`);
-      }
-      const statusData = await statusResp.json();
-
-      if(statusData.status === "done"){
-        const url = BACKEND_URL + statusData.url;
-        setResult(url, raw, "video");
-        addToCreations(url, raw, "video");
-        return;
-      }
-      if(statusData.status === "error"){
-        throw new Error(statusData.error || "Video generation failed");
-      }
-      if(statusData.status === "expired"){
-        throw new Error("Video result expired before it could be retrieved");
-      }
-      // status === "pending" — keep waiting, update loading text with progress
-      updateVideoProgress(attempt, maxAttempts);
-    }
-    throw new Error("Video generation timed out after several minutes");
+    const data = await resp.json();
+    setVideoResults(data.results, raw);
   }
 
-  function updateVideoProgress(attempt, maxAttempts){
-    const el = document.querySelector('.loading-text');
-    if(el){
-      const seconds = attempt * 8;
-      el.textContent = `Generating your video... (${seconds}s elapsed, this can take a few minutes)`;
-    }
+  let videoResultIndex = 0;
+  let currentVideoResults = [];
+
+  function setVideoResults(results, promptText){
+    currentVideoResults = results;
+    videoResultIndex = 0;
+    renderVideoSwipe(promptText);
+  }
+
+  function renderVideoSwipe(promptText){
+    const v = currentVideoResults[videoResultIndex];
+    const count = currentVideoResults.length;
+    stage.innerHTML = `
+      <div class="result">
+        <video src="${v.url}" controls autoplay loop muted style="width:100%; border-radius:18px; display:block;"></video>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; font-size:12px; color:var(--text-3);">
+          <span>${videoResultIndex + 1} / ${count} — ${v.source}, credit: ${v.credit}</span>
+          <a href="${v.source_url}" target="_blank" rel="noopener" style="color:var(--text-3);">View source ↗</a>
+        </div>
+        <div class="result-actions">
+          <button class="action-btn" id="prevVideoBtn" ${videoResultIndex === 0 ? 'disabled' : ''}>
+            ← Prev
+          </button>
+          <a class="action-btn" href="${v.url}" download="vision6-video.mp4">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg>
+            Download
+          </a>
+          <button class="action-btn" id="nextVideoBtn" ${videoResultIndex === count - 1 ? 'disabled' : ''}>
+            Next →
+          </button>
+          <button class="action-btn" id="deepEnterBtn" style="border-color:rgba(95,168,255,0.5); color:#DCEBFF;">
+            Deep
+          </button>
+        </div>
+      </div>
+    `;
+    const prevBtn = document.getElementById('prevVideoBtn');
+    const nextBtn = document.getElementById('nextVideoBtn');
+    if(prevBtn) prevBtn.addEventListener('click', () => {
+      if(videoResultIndex > 0){ videoResultIndex--; renderVideoSwipe(promptText); }
+    });
+    if(nextBtn) nextBtn.addEventListener('click', () => {
+      if(videoResultIndex < count - 1){ videoResultIndex++; renderVideoSwipe(promptText); }
+    });
+    document.getElementById('deepEnterBtn').addEventListener('click', () => openDeep(promptText));
+
+    addToCreations(v.url, promptText, "video");
   }
 
   genBtn.addEventListener('click', generate);
   promptInput.addEventListener('keydown', (e) => {
     if(e.key === 'Enter') generate();
+  });
+
+  /* ---------- Deep mode (HunyuanVideo 1.5, quota-limited) ---------- */
+  const deepOverlay = document.getElementById('deepOverlay');
+  const deepZoomLayer = document.getElementById('deepZoomLayer');
+  const deepContent = document.getElementById('deepContent');
+  const deepExitBtn = document.getElementById('deepExitBtn');
+  const deepPrompt = document.getElementById('deepPrompt');
+  const deepGenBtn = document.getElementById('deepGenBtn');
+  const deepStage = document.getElementById('deepStage');
+  const deepQuotaLabel = document.getElementById('deepQuotaLabel');
+
+  async function openDeep(prefillPrompt){
+    deepOverlay.style.display = "block";
+    deepZoomLayer.style.transform = "scale(1)";
+    deepZoomLayer.style.opacity = "1";
+    deepContent.style.opacity = "0";
+    deepContent.style.pointerEvents = "none";
+
+    if(prefillPrompt) deepPrompt.value = prefillPrompt;
+
+    // zoom-in animation, then reveal the real content
+    requestAnimationFrame(() => {
+      deepZoomLayer.style.transform = "scale(6)";
+      deepZoomLayer.style.opacity = "0";
+    });
+    setTimeout(() => {
+      deepContent.style.opacity = "1";
+      deepContent.style.pointerEvents = "auto";
+    }, 550);
+
+    refreshDeepQuota();
+  }
+
+  function closeDeep(){
+    deepOverlay.style.display = "none";
+    deepZoomLayer.style.transform = "scale(1)";
+    deepZoomLayer.style.opacity = "1";
+  }
+
+  deepExitBtn.addEventListener('click', closeDeep);
+  document.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape' && deepOverlay.style.display === 'block') closeDeep();
+  });
+
+  let _lastDeepLimit = 2;
+
+  async function refreshDeepQuota(){
+    try {
+      const resp = await fetch(BACKEND_URL + "/deep-quota");
+      const data = await resp.json();
+      _lastDeepLimit = data.daily_limit;
+      deepQuotaLabel.textContent = `${data.remaining} of ${data.daily_limit} left today`;
+      deepGenBtn.disabled = data.remaining <= 0;
+    } catch (err) {
+      deepQuotaLabel.textContent = "Quota unavailable";
+    }
+  }
+
+  async function generateDeepVideo(){
+    const prompt = deepPrompt.value.trim();
+    if(!prompt){ deepPrompt.focus(); return; }
+
+    deepGenBtn.disabled = true;
+    deepStage.innerHTML = `<div class="loading-wrap"><div class="loading-text">Starting Deep generation...</div></div>`;
+
+    try {
+      const startResp = await fetch(BACKEND_URL + "/generate-deep-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt })
+      });
+
+      if(!startResp.ok){
+        const errBody = await startResp.json().catch(() => ({}));
+        throw new Error(errBody.detail || `Server error (${startResp.status})`);
+      }
+
+      const { call_id, remaining_after } = await startResp.json();
+      if(remaining_after !== undefined){
+        deepQuotaLabel.textContent = `${remaining_after} of ${_lastDeepLimit} left today`;
+      }
+
+      const maxAttempts = 60;
+      for(let attempt = 0; attempt < maxAttempts; attempt++){
+        await new Promise(r => setTimeout(r, 10000));
+        const statusResp = await fetch(
+          BACKEND_URL + "/deep-video-status?call_id=" + encodeURIComponent(call_id)
+        );
+        if(!statusResp.ok) throw new Error(`Status check failed (${statusResp.status})`);
+        const statusData = await statusResp.json();
+
+        if(statusData.status === "done"){
+          const url = BACKEND_URL + statusData.url;
+          deepStage.innerHTML = `
+            <div class="result">
+              <video src="${url}" controls autoplay loop muted style="width:100%; border-radius:18px; display:block;"></video>
+              <div class="result-actions">
+                <a class="action-btn" href="${url}" download="vision6-deep.mp4">Download</a>
+              </div>
+            </div>
+          `;
+          addToCreations(url, prompt, "video");
+          refreshDeepQuota();
+          return;
+        }
+        if(statusData.status === "error") throw new Error(statusData.error || "Generation failed");
+        if(statusData.status === "expired") throw new Error("Result expired before retrieval");
+
+        const seconds = (attempt + 1) * 10;
+        deepStage.innerHTML = `<div class="loading-wrap"><div class="loading-text">Generating in Deep mode... (${seconds}s elapsed)</div></div>`;
+      }
+      throw new Error("Deep generation timed out");
+    } catch (err) {
+      deepStage.innerHTML = `<div class="error-box">${err.message || 'Something went wrong'}</div>`;
+    } finally {
+      deepGenBtn.disabled = false;
+    }
+  }
+
+  deepGenBtn.addEventListener('click', generateDeepVideo);
+  deepPrompt.addEventListener('keydown', (e) => {
+    if(e.key === 'Enter') generateDeepVideo();
   });
 </script>
 
