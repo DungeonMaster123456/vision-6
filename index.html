@@ -844,7 +844,7 @@
 
     // Poll every 8 seconds. Video generation genuinely takes a few minutes —
     // this loop just waits patiently without holding one long connection open.
-    const maxAttempts = 60; // ~8 minutes ceiling
+    const maxAttempts = 90; // ~12 minutes ceiling, matches higher-quality video settings
     for(let attempt = 0; attempt < maxAttempts; attempt++){
       await new Promise(r => setTimeout(r, 8000));
 
