@@ -7,9 +7,12 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 <script>
   // Backend hosted publicly on Render — reachable from any device
   const BACKEND_URL = "https://vision-6-7n1g.onrender.com";
+  // Replace with your real Turnstile site key from dash.cloudflare.com -> Turnstile
+  const TURNSTILE_SITE_KEY = "0x4AAAAAAE4aZQ9f8nGhpkYN";
 </script>
 <style>
   :root{
@@ -443,7 +446,10 @@
     <button data-view="creations">My creations</button>
     <button data-view="about">About</button>
   </div>
-  <div style="position:relative;">
+  <div style="display:flex; align-items:center; gap:10px;">
+    <button id="signInNavBtn" style="background:rgba(46,124,246,0.14); border:1px solid rgba(95,168,255,0.4); color:#DCEBFF; padding:9px 16px; border-radius:10px; font-size:13px; font-weight:600; cursor:pointer; font-family:inherit;">Sign in</button>
+    <span id="userEmailLabel" style="display:none; font-size:13px; color:var(--text-2);"></span>
+    <div style="position:relative;">
     <button id="settingsBtn" aria-label="Settings" style="background:rgba(255,255,255,0.06); border:none; width:36px; height:36px; border-radius:10px; cursor:pointer; display:flex; align-items:center; justify-content:center;">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#9FB0CC" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="12" cy="12" r="3"/>
@@ -454,8 +460,43 @@
       <button id="settingsApiBtn" style="display:block; width:100%; text-align:left; background:none; border:none; color:var(--text-1); font-size:13px; padding:10px 12px; border-radius:8px; cursor:pointer; font-family:inherit;">API</button>
       <button id="settingsBillingBtn" style="display:block; width:100%; text-align:left; background:none; border:none; color:var(--text-3); font-size:13px; padding:10px 12px; border-radius:8px; cursor:not-allowed; font-family:inherit;" disabled>Billing <span style="font-size:10px; opacity:0.7;">(soon)</span></button>
     </div>
+    </div>
   </div>
 </nav>
+
+<div id="authOverlay" style="display:none; position:fixed; inset:0; z-index:9996; background:rgba(5,9,20,0.75); backdrop-filter:blur(4px); align-items:center; justify-content:center;">
+  <div style="width:min(400px, 90vw); background:var(--bg-1,#0A1224); border:1px solid var(--line-strong); border-radius:18px; padding:28px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+      <span id="authTitle" style="font-size:18px; font-weight:700; color:#fff;">Sign in</span>
+      <button id="authCloseBtn" style="background:rgba(255,255,255,0.08); border:none; color:#fff; width:30px; height:30px; border-radius:8px; cursor:pointer;">✕</button>
+    </div>
+
+    <button id="githubSignInBtn" style="width:100%; background:#1f2530; border:1px solid var(--line-strong); color:#fff; padding:11px; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit; margin-bottom:16px; display:flex; align-items:center; justify-content:center; gap:8px;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.1 3.29 9.4 7.86 10.93.57.1.79-.25.79-.55v-2.1c-3.2.7-3.87-1.35-3.87-1.35-.53-1.33-1.29-1.69-1.29-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.78 1.2 1.78 1.2 1.03 1.77 2.72 1.26 3.38.96.1-.75.4-1.26.73-1.55-2.55-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 015.8 0c2.2-1.49 3.17-1.18 3.17-1.18.64 1.59.24 2.76.12 3.05.74.8 1.18 1.82 1.18 3.08 0 4.42-2.7 5.4-5.26 5.68.42.36.78 1.07.78 2.17v3.22c0 .3.21.66.8.55A10.52 10.52 0 0023.5 12c0-6.35-5.15-11.5-11.5-11.5z"/></svg>
+      Continue with GitHub
+    </button>
+
+    <div style="display:flex; align-items:center; gap:10px; margin-bottom:16px;">
+      <div style="flex:1; height:1px; background:var(--line);"></div>
+      <span style="font-size:11px; color:var(--text-3);">OR</span>
+      <div style="flex:1; height:1px; background:var(--line);"></div>
+    </div>
+
+    <input id="authEmail" type="email" placeholder="Email" autocomplete="email" style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.03); border:1px solid var(--line); border-radius:10px; padding:11px 14px; font-size:14px; color:#fff; margin-bottom:10px; font-family:inherit;" />
+    <input id="authPassword" type="password" placeholder="Password" autocomplete="current-password" style="width:100%; box-sizing:border-box; background:rgba(255,255,255,0.03); border:1px solid var(--line); border-radius:10px; padding:11px 14px; font-size:14px; color:#fff; margin-bottom:14px; font-family:inherit;" />
+
+    <div id="turnstileWidget" style="margin-bottom:14px;"></div>
+
+    <button id="authSubmitBtn" style="width:100%; background:#2E7CF6; border:none; color:#fff; padding:12px; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; font-family:inherit;">Sign in</button>
+
+    <p id="authError" style="color:#FF8A8A; font-size:12px; margin-top:12px; display:none;"></p>
+
+    <p style="text-align:center; font-size:12.5px; color:var(--text-2); margin-top:18px;">
+      <span id="authToggleText">Don't have an account?</span>
+      <a href="#" id="authToggleLink" style="color:#5FA8FF;">Sign up</a>
+    </p>
+  </div>
+</div>
 
 <div id="apiOverlay" style="display:none; position:fixed; inset:0; z-index:9997; background:#F7F8FA; overflow-y:auto;">
   <div style="max-width:760px; margin:0 auto; padding:40px 24px 80px;">
@@ -1172,6 +1213,138 @@
     apiKeyDisplay.textContent = savedKey;
     apiCopyKeyBtn.style.display = "inline-block";
   }
+
+  /* ---------- Auth (sign in / sign up) ---------- */
+  const authOverlay = document.getElementById('authOverlay');
+  const authCloseBtn = document.getElementById('authCloseBtn');
+  const authTitle = document.getElementById('authTitle');
+  const authEmail = document.getElementById('authEmail');
+  const authPassword = document.getElementById('authPassword');
+  const authSubmitBtn = document.getElementById('authSubmitBtn');
+  const authError = document.getElementById('authError');
+  const authToggleText = document.getElementById('authToggleText');
+  const authToggleLink = document.getElementById('authToggleLink');
+  const githubSignInBtn = document.getElementById('githubSignInBtn');
+  const signInNavBtn = document.getElementById('signInNavBtn');
+  const userEmailLabel = document.getElementById('userEmailLabel');
+
+  let authMode = "login"; // "login" | "signup"
+  let turnstileWidgetId = null;
+
+  function openAuth(mode){
+    authMode = mode;
+    authError.style.display = "none";
+    authEmail.value = "";
+    authPassword.value = "";
+    updateAuthMode();
+    authOverlay.style.display = "flex";
+
+    // render Turnstile fresh each time the modal opens
+    const container = document.getElementById('turnstileWidget');
+    container.innerHTML = "";
+    if(window.turnstile && TURNSTILE_SITE_KEY && TURNSTILE_SITE_KEY !== "YOUR_TURNSTILE_SITE_KEY_HERE"){
+      turnstileWidgetId = window.turnstile.render(container, { sitekey: TURNSTILE_SITE_KEY });
+    }
+  }
+
+  function updateAuthMode(){
+    if(authMode === "login"){
+      authTitle.textContent = "Sign in";
+      authSubmitBtn.textContent = "Sign in";
+      authToggleText.textContent = "Don't have an account?";
+      authToggleLink.textContent = "Sign up";
+    } else {
+      authTitle.textContent = "Create account";
+      authSubmitBtn.textContent = "Sign up";
+      authToggleText.textContent = "Already have an account?";
+      authToggleLink.textContent = "Sign in";
+    }
+  }
+
+  signInNavBtn.addEventListener('click', () => openAuth("login"));
+  authCloseBtn.addEventListener('click', () => { authOverlay.style.display = "none"; });
+  authToggleLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    authMode = authMode === "login" ? "signup" : "login";
+    updateAuthMode();
+  });
+
+  authSubmitBtn.addEventListener('click', async () => {
+    const email = authEmail.value.trim();
+    const password = authPassword.value;
+    authError.style.display = "none";
+
+    if(!email || !password){
+      authError.textContent = "Email and password are required.";
+      authError.style.display = "block";
+      return;
+    }
+
+    const turnstileToken = window.turnstile && turnstileWidgetId !== null
+      ? window.turnstile.getResponse(turnstileWidgetId)
+      : "";
+
+    const endpoint = authMode === "login" ? "/auth/login" : "/auth/signup";
+    authSubmitBtn.disabled = true;
+
+    try {
+      const resp = await fetch(BACKEND_URL + endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, turnstile_token: turnstileToken })
+      });
+      const data = await resp.json();
+      if(!resp.ok) throw new Error(data.detail || "Something went wrong");
+
+      localStorage.setItem('vision6_session_token', data.session_token);
+      localStorage.setItem('vision6_user_email', data.email);
+      applySignedInState(data.email);
+      authOverlay.style.display = "none";
+    } catch (err) {
+      authError.textContent = err.message;
+      authError.style.display = "block";
+    } finally {
+      authSubmitBtn.disabled = false;
+    }
+  });
+
+  githubSignInBtn.addEventListener('click', () => {
+    window.location.href = BACKEND_URL + "/auth/github/login";
+  });
+
+  function applySignedInState(email){
+    signInNavBtn.style.display = "none";
+    userEmailLabel.style.display = "inline";
+    userEmailLabel.textContent = email;
+  }
+
+  // Handle GitHub OAuth redirect back with a session_token in the URL
+  const urlParams = new URLSearchParams(window.location.search);
+  const redirectToken = urlParams.get('session_token');
+  if(redirectToken){
+    localStorage.setItem('vision6_session_token', redirectToken);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  }
+
+  // On load, check if there's a saved session and restore it
+  (async () => {
+    const token = localStorage.getItem('vision6_session_token');
+    if(!token) return;
+    try {
+      const resp = await fetch(BACKEND_URL + "/auth/me", {
+        headers: { "X-Session-Token": token }
+      });
+      if(resp.ok){
+        const data = await resp.json();
+        localStorage.setItem('vision6_user_email', data.email);
+        applySignedInState(data.email);
+      } else {
+        localStorage.removeItem('vision6_session_token');
+      }
+    } catch (err) {
+      // network issue — leave state as-is, don't force sign out
+    }
+  })();
 </script>
 
 </body>
