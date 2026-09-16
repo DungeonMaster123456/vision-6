@@ -39,6 +39,17 @@ PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "")
 MODAL_DEEP_GENERATE_URL = os.environ.get("MODAL_DEEP_GENERATE_URL", "")
 MODAL_DEEP_STATUS_URL = os.environ.get("MODAL_DEEP_STATUS_URL", "")
 
+app = FastAPI(title="Vision 6 Backend")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.mount("/files", StaticFiles(directory=OUTPUT_DIR), name="files")
+
 # ---------- Auth ----------
 import hashlib
 import hmac
@@ -226,17 +237,6 @@ def auth_me(x_session_token: str = Header(None)):
     if not email:
         raise HTTPException(401, "Not signed in")
     return {"email": email}
-
-app = FastAPI(title="Vision 6 Backend")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.mount("/files", StaticFiles(directory=OUTPUT_DIR), name="files")
 
 
 # ---------- Public API keys (PER-xxxxxxxx) ----------
