@@ -14,7 +14,7 @@ import base64
 import datetime
 import json as _json
 import httpx
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -38,6 +38,194 @@ PIXABAY_API_KEY = os.environ.get("PIXABAY_API_KEY", "")
 # Deep mode (HunyuanVideo 1.5 on Modal H100) — set after `modal deploy` in modal_deep/
 MODAL_DEEP_GENERATE_URL = os.environ.get("MODAL_DEEP_GENERATE_URL", "")
 MODAL_DEEP_STATUS_URL = os.environ.get("MODAL_DEEP_STATUS_URL", "")
+
+# ---------- Auth ----------
+import hashlib
+import hmac
+import secrets as _secrets
+
+TURNSTILE_SECRET_KEY = os.environ.get("TURNSTILE_SECRET_KEY", "")
+GITHUB_CLIENT_ID = os.environ.get("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.environ.get("GITHUB_CLIENT_SECRET", "")
+GITHUB_CALLBACK_URL = os.environ.get("GITHUB_CALLBACK_URL", "")
+FRONTEND_URL = os.environ.get("FRONTEND_URL", "")
+
+USERS_FILE = os.path.join(os.path.dirname(__file__), "users.json")
+SESSIONS_FILE = os.path.join(os.path.dirname(__file__), "sessions.json")
+
+
+def _load_json_file(path: str) -> dict:
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return _json.load(f)
+        except (ValueError, OSError):
+            pass
+    return {}
+
+
+def _save_json_file(path: str, data: dict):
+    with open(path, "w") as f:
+        _json.dump(data, f)
+
+
+def _hash_password(password: str, salt: str) -> str:
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
+
+
+def _create_session(email: str) -> str:
+    sessions = _load_json_file(SESSIONS_FILE)
+    token = _secrets.token_urlsafe(32)
+    sessions[token] = {"email": email, "created": str(datetime.date.today())}
+    _save_json_file(SESSIONS_FILE, sessions)
+    return token
+
+
+def _get_session_user(token: str) -> str | None:
+    sessions = _load_json_file(SESSIONS_FILE)
+    session = sessions.get(token)
+    return session["email"] if session else None
+
+
+async def _verify_turnstile(token: str, remote_ip: str = "") -> bool:
+    if not TURNSTILE_SECRET_KEY:
+        # not configured — don't block signups, just skip verification
+        return True
+    if not token:
+        return False
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+                data={"secret": TURNSTILE_SECRET_KEY, "response": token, "remoteip": remote_ip},
+            )
+            data = resp.json()
+            return data.get("success", False)
+    except httpx.HTTPError:
+        return False
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    turnstile_token: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+    turnstile_token: str
+
+
+@app.post("/auth/signup")
+async def signup(req: SignupRequest, request: Request):
+    if not req.email.strip() or "@" not in req.email:
+        raise HTTPException(400, "Valid email is required")
+    if len(req.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
+
+    client_ip = request.client.host if request.client else ""
+    if not await _verify_turnstile(req.turnstile_token, client_ip):
+        raise HTTPException(400, "Bot verification failed. Please try again.")
+
+    users = _load_json_file(USERS_FILE)
+    email_key = req.email.strip().lower()
+    if email_key in users:
+        raise HTTPException(409, "An account with this email already exists")
+
+    salt = _secrets.token_hex(16)
+    users[email_key] = {
+        "password_hash": _hash_password(req.password, salt),
+        "salt": salt,
+        "provider": "email",
+        "created": str(datetime.date.today()),
+    }
+    _save_json_file(USERS_FILE, users)
+
+    token = _create_session(email_key)
+    return {"session_token": token, "email": email_key}
+
+
+@app.post("/auth/login")
+async def login(req: LoginRequest, request: Request):
+    client_ip = request.client.host if request.client else ""
+    if not await _verify_turnstile(req.turnstile_token, client_ip):
+        raise HTTPException(400, "Bot verification failed. Please try again.")
+
+    users = _load_json_file(USERS_FILE)
+    email_key = req.email.strip().lower()
+    user = users.get(email_key)
+    if not user or user.get("provider") != "email":
+        raise HTTPException(401, "Invalid email or password")
+
+    check_hash = _hash_password(req.password, user["salt"])
+    if not hmac.compare_digest(check_hash, user["password_hash"]):
+        raise HTTPException(401, "Invalid email or password")
+
+    token = _create_session(email_key)
+    return {"session_token": token, "email": email_key}
+
+
+@app.get("/auth/github/login")
+def github_login():
+    if not GITHUB_CLIENT_ID:
+        raise HTTPException(400, "GitHub OAuth is not configured")
+    from fastapi.responses import RedirectResponse
+    params = f"client_id={GITHUB_CLIENT_ID}&redirect_uri={GITHUB_CALLBACK_URL}&scope=read:user user:email"
+    return RedirectResponse(f"https://github.com/login/oauth/authorize?{params}")
+
+
+@app.get("/auth/github/callback")
+async def github_callback(code: str):
+    from fastapi.responses import RedirectResponse
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            token_resp = await client.post(
+                "https://github.com/login/oauth/access_token",
+                headers={"Accept": "application/json"},
+                data={
+                    "client_id": GITHUB_CLIENT_ID,
+                    "client_secret": GITHUB_CLIENT_SECRET,
+                    "code": code,
+                    "redirect_uri": GITHUB_CALLBACK_URL,
+                },
+            )
+            token_data = token_resp.json()
+            access_token = token_data.get("access_token")
+            if not access_token:
+                raise HTTPException(400, "GitHub authorization failed")
+
+            user_resp = await client.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            gh_user = user_resp.json()
+            email = gh_user.get("email") or f"{gh_user.get('login')}@github.local"
+    except httpx.HTTPError:
+        raise HTTPException(502, "Failed to reach GitHub")
+
+    users = _load_json_file(USERS_FILE)
+    email_key = email.strip().lower()
+    if email_key not in users:
+        users[email_key] = {
+            "provider": "github",
+            "github_login": gh_user.get("login"),
+            "created": str(datetime.date.today()),
+        }
+        _save_json_file(USERS_FILE, users)
+
+    session_token = _create_session(email_key)
+    redirect_url = f"{FRONTEND_URL}?session_token={session_token}" if FRONTEND_URL else "/"
+    return RedirectResponse(redirect_url)
+
+
+@app.get("/auth/me")
+def auth_me(x_session_token: str = Header(None)):
+    email = _get_session_user(x_session_token) if x_session_token else None
+    if not email:
+        raise HTTPException(401, "Not signed in")
+    return {"email": email}
 
 app = FastAPI(title="Vision 6 Backend")
 
