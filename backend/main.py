@@ -51,6 +51,56 @@ app.add_middleware(
 app.mount("/files", StaticFiles(directory=OUTPUT_DIR), name="files")
 
 
+# ---------- Public API keys (PER-xxxxxxxx) ----------
+# Simple functional key system: generate once, store in a local JSON file,
+# validate on requests to public API endpoints. Not enterprise-grade auth,
+# but genuinely functional — a valid key is required and checked.
+import secrets
+
+API_KEYS_FILE = os.path.join(os.path.dirname(__file__), "api_keys.json")
+
+
+def _load_api_keys() -> dict:
+    if os.path.exists(API_KEYS_FILE):
+        try:
+            with open(API_KEYS_FILE) as f:
+                return _json.load(f)
+        except (ValueError, OSError):
+            pass
+    return {}
+
+
+def _save_api_keys(keys: dict):
+    with open(API_KEYS_FILE, "w") as f:
+        _json.dump(keys, f)
+
+
+def _generate_api_key() -> str:
+    keys = _load_api_keys()
+    new_key = "PER" + secrets.token_hex(16).upper()
+    keys[new_key] = {"created": str(datetime.date.today()), "requests": 0}
+    _save_api_keys(keys)
+    return new_key
+
+
+def _validate_api_key(key: str) -> bool:
+    keys = _load_api_keys()
+    if key not in keys:
+        return False
+    keys[key]["requests"] = keys[key].get("requests", 0) + 1
+    _save_api_keys(keys)
+    return True
+
+
+from fastapi import Header
+
+
+def require_api_key(x_api_key: str = Header(None)):
+    if not x_api_key or not _validate_api_key(x_api_key):
+        raise HTTPException(401, "Missing or invalid API key. Pass it as the X-API-Key header.")
+    return x_api_key
+
+
 # ---------- Deep mode quota ----------
 # 2 videos/day most months, 3/day in February — keeps monthly usage safely
 # under the $30 Modal budget at roughly $0.30/video (H100 rate).
@@ -116,6 +166,27 @@ class DeepVideoRequest(BaseModel):
 
 
 # ---------- endpoints ----------
+
+@app.post("/api-keys/generate")
+def generate_api_key():
+    """Generates a new public API key (PER-xxxxxxxx). No auth needed to create one."""
+    key = _generate_api_key()
+    return {"api_key": key}
+
+
+@app.post("/public/generate-image")
+def public_generate_image(req: ImageRequest, api_key: str = Header(None, alias="X-API-Key")):
+    """Public API version of image generation. Requires a valid X-API-Key header."""
+    require_api_key(api_key)
+    return generate_image(req)
+
+
+@app.post("/public/search-video")
+def public_search_video(req: VideoSearchRequest, api_key: str = Header(None, alias="X-API-Key")):
+    """Public API version of video search. Requires a valid X-API-Key header."""
+    require_api_key(api_key)
+    return search_video(req)
+
 
 @app.get("/health")
 def health():
