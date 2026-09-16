@@ -14,7 +14,7 @@ import base64
 import datetime
 import json as _json
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -278,9 +278,6 @@ def _validate_api_key(key: str) -> bool:
     keys[key]["requests"] = keys[key].get("requests", 0) + 1
     _save_api_keys(keys)
     return True
-
-
-from fastapi import Header
 
 
 def require_api_key(x_api_key: str = Header(None)):
